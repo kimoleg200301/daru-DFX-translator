@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, Optional
 
 try:
     from PySide6.QtCore import QThread, Signal
+    from PySide6.QtGui import QColor
     from PySide6.QtWidgets import (
         QApplication,
         QCheckBox,
@@ -18,6 +19,7 @@ try:
         QHBoxLayout,
         QAbstractItemView,
         QListWidget,
+        QListWidgetItem,
         QLabel,
         QLineEdit,
         QMessageBox,
@@ -400,7 +402,10 @@ class MainWindow(QWidget):
         }
 
     def append_log(self, message: str) -> None:
-        self.log_view.addItem(message)
+        item = QListWidgetItem(message)
+        if message.startswith("Готово. Результат"):
+            item.setForeground(QColor("#1E8F40"))
+        self.log_view.addItem(item)
         self.log_view.scrollToBottom()
 
     def clear_log(self) -> None:
@@ -433,7 +438,7 @@ class MainWindow(QWidget):
             "translated_txt_path": Path(self.translated_path_edit.text()) if self.txt_checkbox.isChecked() and self.translated_path_edit.text() else None,
             "save_txt": self.txt_checkbox.isChecked(),
         }
-        self.append_log("Запуск процесса перевода...")
+        self.append_log("Запуск процесса перевода... [0%]")
         self.start_button.setEnabled(False)
         self.worker = TranslateWorker(params)
         self.worker.log_signal.connect(self.append_log)

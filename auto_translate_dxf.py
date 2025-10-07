@@ -102,13 +102,13 @@ def translate_dxf(
 ) -> Dict[str, Any]:
     logger = log or (lambda message: None)
 
-    logger(f"Загружаем DXF: {input_path}")
+    logger(f"Загружаем DXF: {input_path} [10%]")
     doc = ezdxf.readfile(str(input_path))
 
     freq = extractor.extract_text_counts(doc)
     sorted_items = extractor.sort_frequency(freq)
     english_texts = [text for text, _ in sorted_items]
-    logger(f"Найдено {len(english_texts)} текстовых элементов для перевода")
+    logger(f"Найдено {len(english_texts)} текстовых элементов для перевода [20%]")
 
     translator = TranslationEngine(
         provider=translator_name,
@@ -120,36 +120,36 @@ def translate_dxf(
         openai_base_url=openai_base_url,
         openai_temperature=openai_temperature,
     )
-    logger(f"Инициализирован движок перевода: {translator.backend_name()}")
+    logger(f"Инициализирован движок перевода: {translator.backend_name()} [35%]")
 
     context_factory = translation_context_factory or (lambda _msg: nullcontext())
-    logger("Начинаем перевод...")
+    logger("Начинаем перевод... [45%]")
     with context_factory("Переводим..."):
         russian_texts = translator.translate_many(english_texts)
-    logger("Перевод завершён")
+    logger("Перевод завершён [70%]")
 
     if save_txt and extracted_txt_path:
         ensure_parent(extracted_txt_path)
         extractor.write_txt(freq, extracted_txt_path)
-        logger(f"Сохранён TXT с исходными текстами: {extracted_txt_path}")
+        logger(f"Сохранён TXT с исходными текстами: {extracted_txt_path} [75%]")
     if save_txt and translated_txt_path:
         ensure_parent(translated_txt_path)
         write_translated_txt(translated_txt_path, sorted_items, russian_texts)
-        logger(f"Сохранён TXT с переводами: {translated_txt_path}")
+        logger(f"Сохранён TXT с переводами: {translated_txt_path} [78%]")
 
     if save_map and map_path:
         ensure_parent(map_path)
         write_map_csv(map_path, english_texts, russian_texts)
-        logger(f"Сохранена карта переводов CSV: {map_path}")
+        logger(f"Сохранена карта переводов CSV: {map_path} [82%]")
 
     pairs = list(zip(english_texts, russian_texts))
     pairs.sort(key=lambda x: -len(x[0]))
-    logger("Применяем переводы к DXF")
+    logger("Применяем переводы к DXF [90%]")
     apply_translations(doc, pairs, style_font=style_font)
 
     ensure_parent(output_path)
     doc.saveas(str(output_path))
-    logger(f"DXF сохранён: {output_path}")
+    logger(f"DXF сохранён: {output_path} [100%]")
 
     return {
         "output_path": output_path,
