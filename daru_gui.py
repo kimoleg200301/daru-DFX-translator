@@ -7,7 +7,6 @@ from typing import Any, Dict, Iterable, Optional
 
 try:
     from PySide6.QtCore import QThread, Signal
-    from PySide6.QtGui import QColor, QTextCursor, QTextFormat
     from PySide6.QtWidgets import (
         QApplication,
         QCheckBox,
@@ -17,11 +16,12 @@ try:
         QFileDialog,
         QFormLayout,
         QHBoxLayout,
+        QAbstractItemView,
+        QListWidget,
         QLabel,
         QLineEdit,
         QMessageBox,
         QPushButton,
-        QPlainTextEdit,
         QSpinBox,
         QVBoxLayout,
         QWidget,
@@ -272,8 +272,14 @@ class MainWindow(QWidget):
         self.clear_log_button = QPushButton("Очистить лог")
         self.clear_log_button.clicked.connect(self.clear_log)
 
-        self.log_view = QPlainTextEdit()
-        self.log_view.setReadOnly(True)
+        self.log_view = QListWidget()
+        self.log_view.setAlternatingRowColors(True)
+        self.log_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.log_view.setStyleSheet(
+            "QListWidget { background: #ffffff; border: 1px solid #d0d0d0; }"
+            "QListWidget::item { padding: 4px; background: #ffffff; }"
+            "QListWidget::item:alternate { background: #f5f5f5; }"
+        )
 
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(self.status_label)
@@ -394,32 +400,11 @@ class MainWindow(QWidget):
         }
 
     def append_log(self, message: str) -> None:
-        self.log_view.appendPlainText(message)
-        scrollbar = self.log_view.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
-        self._update_log_styles()
+        self.log_view.addItem(message)
+        self.log_view.scrollToBottom()
 
     def clear_log(self) -> None:
         self.log_view.clear()
-        self.log_view.setExtraSelections([])
-
-    def _update_log_styles(self) -> None:
-        doc = self.log_view.document()
-        selections = []
-        block = doc.firstBlock()
-        index = 0
-        while block.isValid():
-            selection = QPlainTextEdit.ExtraSelection()
-            color = QColor("#ffffff") if index % 2 == 0 else QColor("#f5f5f5")
-            selection.format.setBackground(color)
-            selection.format.setProperty(QTextFormat.FullWidthSelection, True)
-            cursor = QTextCursor(block)
-            cursor.clearSelection()
-            selection.cursor = cursor
-            selections.append(selection)
-            block = block.next()
-            index += 1
-        self.log_view.setExtraSelections(selections)
 
     def start_translation(self) -> None:
         input_path = self.input_edit.text().strip()
