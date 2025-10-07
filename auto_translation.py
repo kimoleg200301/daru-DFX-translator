@@ -126,6 +126,10 @@ class TranslationEngine:
         if self.provider in ("chatgpt", "gpt", "openai"):
             if not self.openai_api_key:
                 raise RuntimeError("OPENAI_API_KEY не задан")
+
+            os.environ["OPENAI_API_KEY"] = self.openai_api_key
+            if self.openai_base_url:
+                os.environ["OPENAI_BASE_URL"] = self.openai_base_url
             try:
                 import openai  # type: ignore
 
@@ -295,6 +299,11 @@ class TranslationEngine:
         module = translator.get("module")
         model = translator.get("model")
         batch_size = translator.get("batch_size", 16)
+
+        if self.openai_api_key:
+            os.environ["OPENAI_API_KEY"] = self.openai_api_key
+        if self.openai_base_url:
+            os.environ["OPENAI_BASE_URL"] = self.openai_base_url
 
         chat_completion_create: Optional[Callable[..., object]] = None
         if module is not None:
@@ -474,10 +483,6 @@ class TranslationEngine:
                                 "messages": single_messages,
                                 "response_format": {"type": "json_object"},
                             }
-                            if self.openai_api_key:
-                                completion_kwargs["api_key"] = self.openai_api_key
-                            if self.openai_base_url:
-                                completion_kwargs["base_url"] = self.openai_base_url
                             completion = chat_completion_create(**completion_kwargs)  # type: ignore[misc]
                         elif module is not None:
                             completion = module.ChatCompletion.create(  # type: ignore[attr-defined]
