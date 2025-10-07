@@ -2,7 +2,7 @@ import json
 import os
 import re
 from itertools import zip_longest
-from typing import Iterable, List, Optional, Sequence
+from typing import Callable, Iterable, List, Optional, Sequence
 
 DIM_PLACEHOLDER = "__DXF_DIM__"
 
@@ -296,6 +296,14 @@ class TranslationEngine:
         model = translator.get("model")
         batch_size = translator.get("batch_size", 16)
 
+        chat_completion_create: Optional[Callable[..., object]] = None
+        if module is not None:
+            chat_namespace = getattr(module, "chat", None)
+            completions_namespace = getattr(chat_namespace, "completions", None) if chat_namespace else None
+            create_attr = getattr(completions_namespace, "create", None) if completions_namespace else None
+            if callable(create_attr):
+                chat_completion_create = create_attr
+
         openai_major_version: Optional[int] = None
         if module:
             version_value = getattr(module, "__version__", None)
@@ -335,7 +343,7 @@ class TranslationEngine:
             if fallback_client is not None:
                 client = fallback_client
                 mode = "new"
-            elif openai_major_version and openai_major_version >= 1 and fallback_client is None:
+            elif not chat_completion_create and openai_major_version and openai_major_version >= 1:
                 raise RuntimeError(
                     "Установлен openai>=1.0.0, но не удалось инициализировать новый клиент. "
                     "Переустановите пакет 'openai' или закрепите версию <1.0."
@@ -343,7 +351,7 @@ class TranslationEngine:
 
         results: List[str] = list(texts)
         if mode == "legacy":
-            if not module or not model:
+            if (not chat_completion_create) and (not module or not model):
                 return results
         else:
             if not client or not model:
@@ -459,11 +467,21 @@ class TranslationEngine:
                         {"role": "user", "content": single_payload},
                     ]
                     try:
-                        completion = module.ChatCompletion.create(  # type: ignore[attr-defined]
-                            model=model,
-                            temperature=self.openai_temperature,
-                            messages=single_messages,
-                        )
+                        if chat_completion_create:
+                            completion = chat_completion_create(  # type: ignore[misc]
+                                model=model,
+                                temperature=self.openai_temperature,
+                                response_format={"type": "json_object"},
+                                messages=single_messages,
+                            )
+                        elif module is not None:
+                            completion = module.ChatCompletion.create(  # type: ignore[attr-defined]
+                                model=model,
+                                temperature=self.openai_temperature,
+                                messages=single_messages,
+                            )
+                        else:  # pragma: no cover - defensive
+                            raise RuntimeError("OpenAI legacy интерфейс недоступен")
                     except Exception as exc:  # pragma: no cover - network
                         raise RuntimeError(f"ChatGPT translation failed: {exc}") from exc
 
