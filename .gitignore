@@ -3,3 +3,8 @@
 
 # (опционально) Игнорировать любые папки с именем Applications на любых уровнях
 **/Applications/
+
+/dist/
+/build/
+
+.DS_Store

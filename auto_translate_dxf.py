@@ -102,13 +102,13 @@ def translate_dxf(
 ) -> Dict[str, Any]:
     logger = log or (lambda message: None)
 
-    logger(f"Загружаем DXF: {input_path} [10%]")
+    logger(f"Загружаем DXF: {input_path}")
     doc = ezdxf.readfile(str(input_path))
 
     freq = extractor.extract_text_counts(doc)
     sorted_items = extractor.sort_frequency(freq)
     english_texts = [text for text, _ in sorted_items]
-    logger(f"Найдено {len(english_texts)} текстовых элементов для перевода [20%]")
+    logger(f"Найдено {len(english_texts)} текстовых элементов для перевода")
 
     translator = TranslationEngine(
         provider=translator_name,
@@ -120,36 +120,52 @@ def translate_dxf(
         openai_base_url=openai_base_url,
         openai_temperature=openai_temperature,
     )
-    logger(f"Инициализирован движок перевода: {translator.backend_name()} [35%]")
+    logger(f"Инициализирован движок перевода: {translator.backend_name()}")
 
     context_factory = translation_context_factory or (lambda _msg: nullcontext())
-    logger("Начинаем перевод... [45%]")
-    with context_factory("Переводим..."):
-        russian_texts = translator.translate_many(english_texts)
-    logger("Перевод завершён [70%]")
+    logger("Начинаем перевод... [0%]")
+    total_items = len(english_texts)
+    russian_texts: List[str] = []
+    if total_items == 0:
+        logger("Начинаем перевод... [100%]")
+    else:
+        batch_size = max(1, total_items // 20)  # целимся максимум в ~20 шагов
+        processed = 0
+        with context_factory("Переводим..."):
+            for start in range(0, total_items, batch_size):
+                chunk = english_texts[start : start + batch_size]
+                translated_chunk = translator.translate_many(chunk)
+                russian_texts.extend(translated_chunk)
+                processed += len(translated_chunk)
+                percent = min(100, int(processed / total_items * 100))
+                logger(f"Начинаем перевод... [{percent}%]")
+        if processed < total_items:
+            # На случай, если последний перевод не дожал до 100%
+            logger("Начинаем перевод... [100%]")
+    logger("Перевод завершён")
 
     if save_txt and extracted_txt_path:
         ensure_parent(extracted_txt_path)
         extractor.write_txt(freq, extracted_txt_path)
-        logger(f"Сохранён TXT с исходными текстами: {extracted_txt_path} [75%]")
+        logger(f"Сохранён TXT с исходными текстами: {extracted_txt_path}")
     if save_txt and translated_txt_path:
         ensure_parent(translated_txt_path)
         write_translated_txt(translated_txt_path, sorted_items, russian_texts)
-        logger(f"Сохранён TXT с переводами: {translated_txt_path} [78%]")
+        logger(f"Сохранён TXT с переводами: {translated_txt_path}")
 
     if save_map and map_path:
         ensure_parent(map_path)
         write_map_csv(map_path, english_texts, russian_texts)
-        logger(f"Сохранена карта переводов CSV: {map_path} [82%]")
+        logger(f"Сохранена карта переводов CSV: {map_path}")
 
     pairs = list(zip(english_texts, russian_texts))
     pairs.sort(key=lambda x: -len(x[0]))
-    logger("Применяем переводы к DXF [90%]")
+    logger("Применяем переводы к DXF")
     apply_translations(doc, pairs, style_font=style_font)
 
     ensure_parent(output_path)
     doc.saveas(str(output_path))
-    logger(f"DXF сохранён: {output_path} [100%]")
+    logger(f"DXF сохранён: {output_path}")
 
     return {
         "output_path": output_path,

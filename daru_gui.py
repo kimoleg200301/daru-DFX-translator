@@ -438,7 +438,7 @@ class MainWindow(QWidget):
             "translated_txt_path": Path(self.translated_path_edit.text()) if self.txt_checkbox.isChecked() and self.translated_path_edit.text() else None,
             "save_txt": self.txt_checkbox.isChecked(),
         }
-        self.append_log("Запуск процесса перевода... [0%]")
+        self.append_log("Запуск процесса перевода...")
         self.start_button.setEnabled(False)
         self.worker = TranslateWorker(params)
         self.worker.log_signal.connect(self.append_log)
