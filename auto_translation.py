@@ -295,6 +295,52 @@ class TranslationEngine:
         module = translator.get("module")
         model = translator.get("model")
         batch_size = translator.get("batch_size", 16)
+
+        openai_major_version: Optional[int] = None
+        if module:
+            version_value = getattr(module, "__version__", None)
+            if isinstance(version_value, str):
+                major_part = version_value.split(".", 1)[0]
+                if major_part.isdigit():
+                    openai_major_version = int(major_part)
+
+        fallback_client = None
+        if mode == "legacy":
+            fallback_client = client
+            if fallback_client is None and module and hasattr(module, "OpenAI"):
+                client_kwargs = {"api_key": self.openai_api_key}
+                if self.openai_base_url:
+                    client_kwargs["base_url"] = self.openai_base_url
+                try:
+                    fallback_client = module.OpenAI(**client_kwargs)  # type: ignore[attr-defined]
+                except TypeError:
+                    fallback_client = None
+                    try:
+                        client_kwargs.pop("base_url", None)
+                        fallback_client = module.OpenAI(**client_kwargs)  # type: ignore[attr-defined]
+                        if self.openai_base_url and fallback_client is not None:
+                            with_options = getattr(fallback_client, "with_options", None)
+                            if callable(with_options):
+                                fallback_client = with_options(base_url=self.openai_base_url)
+                            else:
+                                try:
+                                    setattr(fallback_client, "base_url", self.openai_base_url)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        fallback_client = None
+                except Exception:
+                    fallback_client = None
+
+            if fallback_client is not None:
+                client = fallback_client
+                mode = "new"
+            elif openai_major_version and openai_major_version >= 1 and fallback_client is None:
+                raise RuntimeError(
+                    "Установлен openai>=1.0.0, но не удалось инициализировать новый клиент. "
+                    "Переустановите пакет 'openai' или закрепите версию <1.0."
+                )
+
         results: List[str] = list(texts)
         if mode == "legacy":
             if not module or not model:
@@ -318,6 +364,60 @@ class TranslationEngine:
             if re.fullmatch(r"[-+]?\d+[\d\s./-]*", stripped):
                 return False
             return True
+
+        def extract_message(completion_obj) -> str:
+            if completion_obj is None:
+                return ""
+
+            choices_obj = getattr(completion_obj, "choices", None)
+            if choices_obj:
+                first_choice = choices_obj[0]
+                message_obj = getattr(first_choice, "message", None)
+                if message_obj is not None:
+                    content_attr = getattr(message_obj, "content", None)
+                    if isinstance(content_attr, str) and content_attr:
+                        return content_attr
+                    if isinstance(message_obj, dict):
+                        content = message_obj.get("content")
+                        if isinstance(content, str) and content:
+                            return content
+                text_attr = getattr(first_choice, "text", None)
+                if isinstance(text_attr, str) and text_attr:
+                    return text_attr
+                if isinstance(first_choice, dict):
+                    message_dict = first_choice.get("message", {})
+                    if isinstance(message_dict, dict):
+                        content = message_dict.get("content")
+                        if isinstance(content, str) and content:
+                            return content
+                    text_val = first_choice.get("text")
+                    if isinstance(text_val, str) and text_val:
+                        return text_val
+
+            if isinstance(completion_obj, dict):
+                choices_dict = completion_obj.get("choices", [])
+                if isinstance(choices_dict, list) and choices_dict:
+                    first_choice = choices_dict[0]
+                    if isinstance(first_choice, dict):
+                        message_dict = first_choice.get("message", {})
+                        if isinstance(message_dict, dict):
+                            content = message_dict.get("content")
+                            if isinstance(content, str) and content:
+                                return content
+                        text_val = first_choice.get("text")
+                        if isinstance(text_val, str) and text_val:
+                            return text_val
+
+            model_dump = getattr(completion_obj, "model_dump", None)
+            if callable(model_dump):
+                try:
+                    dumped = model_dump()
+                except Exception:  # pragma: no cover - best effort
+                    dumped = None
+                if isinstance(dumped, dict):
+                    return extract_message(dumped)
+
+            return ""
 
         candidate_indices = []
         for idx, prepared in enumerate(texts):
@@ -367,15 +467,7 @@ class TranslationEngine:
                     except Exception as exc:  # pragma: no cover - network
                         raise RuntimeError(f"ChatGPT translation failed: {exc}") from exc
 
-                    message = ""
-                    if isinstance(completion, dict):
-                        choices = completion.get("choices", [])
-                        if isinstance(choices, list) and choices:
-                            first = choices[0]
-                            if isinstance(first, dict):
-                                message = first.get("message", {}).get("content", "") or first.get("text", "")
-                    if not message:
-                        message = "{}"
+                    message = extract_message(completion) or "{}"
 
                     translated_text = texts[idx]
                     try:
@@ -403,9 +495,7 @@ class TranslationEngine:
             except Exception as exc:  # pragma: no cover - network
                 raise RuntimeError(f"ChatGPT translation failed: {exc}") from exc
 
-            message = completion.choices[0].message.content if completion.choices else ""
-            if not message:
-                message = "{}"
+            message = extract_message(completion) or "{}"
             try:
                 data = json.loads(message or "{}")
             except json.JSONDecodeError as exc:
