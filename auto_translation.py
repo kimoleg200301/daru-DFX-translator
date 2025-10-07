@@ -468,12 +468,17 @@ class TranslationEngine:
                     ]
                     try:
                         if chat_completion_create:
-                            completion = chat_completion_create(  # type: ignore[misc]
-                                model=model,
-                                temperature=self.openai_temperature,
-                                response_format={"type": "json_object"},
-                                messages=single_messages,
-                            )
+                            completion_kwargs = {
+                                "model": model,
+                                "temperature": self.openai_temperature,
+                                "messages": single_messages,
+                                "response_format": {"type": "json_object"},
+                            }
+                            if self.openai_api_key:
+                                completion_kwargs["api_key"] = self.openai_api_key
+                            if self.openai_base_url:
+                                completion_kwargs["base_url"] = self.openai_base_url
+                            completion = chat_completion_create(**completion_kwargs)  # type: ignore[misc]
                         elif module is not None:
                             completion = module.ChatCompletion.create(  # type: ignore[attr-defined]
                                 model=model,
