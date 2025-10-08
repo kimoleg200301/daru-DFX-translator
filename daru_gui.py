@@ -122,6 +122,7 @@ class AppSettings:
     openai_temperature: float = 0.2
     openai_strict_mode: str = "verbosity"
     openai_strict_value: float = 0.5
+    output_format: str = "dwg"
     save_map: bool = True
     save_txt: bool = True
     last_directory: str = str(Path.home())
@@ -257,28 +258,33 @@ class MainWindow(QWidget):
         super().__init__()
         self.settings_manager = settings_manager
         self.worker: Optional[TranslateWorker] = None
-        self.setWindowTitle("Daru DXF Translator")
+        self.setWindowTitle("Daru DWG Translator")
         self.resize(860, 640)
         self.setAcceptDrops(True)
 
-        self.status_label = QLabel("Перетащите DXF файл или выберите его через обозреватель.")
+        self.status_label = QLabel("Перетащите DWG/DXF файл или выберите его через обозреватель.")
         self.input_edit = QLineEdit()
         self.input_edit.setReadOnly(True)
         self.input_browse = QPushButton("Обзор...")
         self.input_browse.clicked.connect(self.select_input_file)
 
         input_row = QHBoxLayout()
-        input_row.addWidget(QLabel("Входной DXF"))
+        input_row.addWidget(QLabel("Входной файл"))
         input_row.addWidget(self.input_edit)
         input_row.addWidget(self.input_browse)
 
         self.output_edit = QLineEdit()
         self.output_browse = QPushButton("Сохранить как...")
         self.output_browse.clicked.connect(self.select_output_file)
+        self.output_format_combo = QComboBox()
+        self.output_format_combo.addItems(OUTPUT_FORMAT_CHOICES)
+        self.output_format_combo.currentTextChanged.connect(self.handle_output_format_change)
         output_row = QHBoxLayout()
-        output_row.addWidget(QLabel("Выходной DXF"))
+        output_row.addWidget(QLabel("Выходной файл"))
         output_row.addWidget(self.output_edit)
         output_row.addWidget(self.output_browse)
+        output_row.addWidget(QLabel("Формат"))
+        output_row.addWidget(self.output_format_combo)
 
         self.translator_combo = QComboBox()
         self.translator_combo.addItems(["google", "deep_google", "googletrans", "deepl", "chatgpt", "noop"])
@@ -367,6 +373,7 @@ class MainWindow(QWidget):
 
         self.restore_from_settings()
         self.update_aux_controls()
+        self.sync_output_suffix()
 
     def restore_from_settings(self) -> None:
         data = self.settings_manager.data
@@ -376,6 +383,7 @@ class MainWindow(QWidget):
         self.style_font_combo.setCurrentText(data.style_font)
         self.map_checkbox.setChecked(data.save_map)
         self.txt_checkbox.setChecked(data.save_txt)
+        self.output_format_combo.setCurrentText(data.output_format or "dwg")
 
     def browse_aux_file(self, target: QLineEdit) -> None:
         start_dir = Path(target.text()).parent if target.text() else Path(self.settings_manager.data.last_directory)
@@ -385,15 +393,24 @@ class MainWindow(QWidget):
 
     def select_input_file(self) -> None:
         start_dir = self.settings_manager.data.last_directory
-        filename, _ = QFileDialog.getOpenFileName(self, "Выберите DXF", start_dir, "DXF files (*.dxf)")
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Выберите файл",
+            start_dir,
+            "CAD files (*.dxf *.dwg)"
+        )
         if filename:
             self.set_input_file(Path(filename))
 
     def select_output_file(self) -> None:
         start_dir = Path(self.output_edit.text()).parent if self.output_edit.text() else self.settings_manager.data.last_directory
-        filename, _ = QFileDialog.getSaveFileName(self, "Сохранить DXF", str(start_dir), "DXF files (*.dxf)")
+        fmt = (self.output_format_combo.currentText() or "dwg").lower()
+        pattern = "DWG files (*.dwg)" if fmt == "dwg" else "DXF files (*.dxf)"
+        caption = "Сохранить DWG" if fmt == "dwg" else "Сохранить DXF"
+        filename, _ = QFileDialog.getSaveFileName(self, caption, str(start_dir), pattern)
         if filename:
             self.output_edit.setText(filename)
+            self.sync_output_suffix()
 
     def update_aux_controls(self) -> None:
         self.map_path_edit.setEnabled(self.map_checkbox.isChecked())
@@ -401,17 +418,22 @@ class MainWindow(QWidget):
         for widget in (self.extracted_path_edit, self.extracted_browse, self.translated_path_edit, self.translated_browse):
             widget.setEnabled(self.txt_checkbox.isChecked())
 
+    def handle_output_format_change(self, _value: str) -> None:
+        self.sync_output_suffix()
+        fmt = (self.output_format_combo.currentText() or "dwg").lower()
+        self.settings_manager.update(output_format=fmt)
+
     def dragEnterEvent(self, event) -> None:  # type: ignore[override]
         if event.mimeData().hasUrls():
             for url in event.mimeData().urls():
-                if url.isLocalFile() and url.toLocalFile().lower().endswith(".dxf"):
+                if url.isLocalFile() and url.toLocalFile().lower().endswith((".dxf", ".dwg")):
                     event.acceptProposedAction()
                     return
         event.ignore()
 
     def dropEvent(self, event) -> None:  # type: ignore[override]
         for url in event.mimeData().urls():
-            if url.isLocalFile() and url.toLocalFile().lower().endswith(".dxf"):
+            if url.isLocalFile() and url.toLocalFile().lower().endswith((".dxf", ".dwg")):
                 self.set_input_file(Path(url.toLocalFile()))
                 event.acceptProposedAction()
                 return
@@ -420,6 +442,11 @@ class MainWindow(QWidget):
     def set_input_file(self, path: Path) -> None:
         self.input_edit.setText(str(path))
         self.status_label.setText(f"Выбран файл: {path.name}")
+        suffix = path.suffix.lower()
+        if suffix == ".dwg":
+            self.output_format_combo.setCurrentText("dwg")
+        elif suffix == ".dxf" and self.output_format_combo.currentText() not in OUTPUT_FORMAT_CHOICES:
+            self.output_format_combo.setCurrentText("dwg")
         defaults = self.derive_default_paths(path)
         self.output_edit.setText(str(defaults["output"]))
         self.map_path_edit.setText(str(defaults["map"]))
@@ -428,15 +455,28 @@ class MainWindow(QWidget):
         self.settings_manager.update(last_directory=str(path.parent))
         self.update_aux_controls()
 
+        self.sync_output_suffix()
+
     def derive_default_paths(self, input_path: Path) -> Dict[str, Path]:
         stem = input_path.stem
         parent = input_path.parent
+        out_suffix = ".dwg" if (self.output_format_combo.currentText() or "dwg").lower() == "dwg" else ".dxf"
         return {
-            "output": parent / f"{stem}_ru{input_path.suffix}",
+            "output": parent / f"{stem}_ru{out_suffix}",
             "map": parent / f"{stem}_map.csv",
             "extracted": parent / f"{stem}_texts.txt",
             "translated": parent / f"{stem}_texts_ru.txt",
         }
+
+    def sync_output_suffix(self) -> None:
+        fmt = (self.output_format_combo.currentText() or "dwg").lower()
+        suffix = ".dwg" if fmt == "dwg" else ".dxf"
+        current = self.output_edit.text().strip()
+        if current:
+            path = Path(current)
+            if path.suffix.lower() != suffix:
+                path = path.with_suffix(suffix)
+                self.output_edit.setText(str(path))
 
     def append_log(self, message: str) -> None:
         item = QListWidgetItem(message)
@@ -452,14 +492,22 @@ class MainWindow(QWidget):
         input_path = self.input_edit.text().strip()
         output_path = self.output_edit.text().strip()
         if not input_path:
-            QMessageBox.warning(self, "Ошибка", "Выберите входной DXF файл")
+            QMessageBox.warning(self, "Ошибка", "Выберите входной файл")
             return
         if not output_path:
-            QMessageBox.warning(self, "Ошибка", "Укажите путь для сохранения DXF")
+            QMessageBox.warning(self, "Ошибка", "Укажите путь для сохранения файла")
             return
+        format_choice = (self.output_format_combo.currentText() or "dwg").lower()
+        expected_suffix = ".dwg" if format_choice == "dwg" else ".dxf"
+        output_path_obj = Path(output_path)
+        if output_path_obj.suffix.lower() != expected_suffix:
+            output_path_obj = output_path_obj.with_suffix(expected_suffix)
+            self.output_edit.setText(str(output_path_obj))
+        else:
+            output_path_obj = output_path_obj
         params: Dict[str, Any] = {
             "input_path": Path(input_path),
-            "output_path": Path(output_path),
+            "output_path": output_path_obj,
             "translator_name": self.translator_combo.currentText(),
             "source_lang": self.source_lang_combo.currentText().strip() or "en",
             "target_lang": self.target_lang_combo.currentText().strip() or "ru",
@@ -471,6 +519,7 @@ class MainWindow(QWidget):
             "openai_temperature": self.settings_manager.data.openai_temperature,
             "openai_strict_mode": self.settings_manager.data.openai_strict_mode or None,
             "openai_strict_value": self.settings_manager.data.openai_strict_value,
+            "output_format": format_choice,
             "map_path": Path(self.map_path_edit.text()) if self.map_checkbox.isChecked() and self.map_path_edit.text() else None,
             "save_map": self.map_checkbox.isChecked(),
             "extracted_txt_path": Path(self.extracted_path_edit.text()) if self.txt_checkbox.isChecked() and self.extracted_path_edit.text() else None,
@@ -496,9 +545,10 @@ class MainWindow(QWidget):
     def handle_finished(self, payload: Dict[str, Any]) -> None:
         self.append_log(f"Готово. Результат: {payload['output_path']}")
         self.append_log(f"Движок перевода: {payload['backend']}")
-        QMessageBox.information(self, "Готово", f"DXF сохранён: {payload['output_path']}")
+        QMessageBox.information(self, "Готово", f"Файл сохранён: {payload['output_path']}")
         self.start_button.setEnabled(True)
         self.status_label.setText("Перевод завершён")
+        format_choice = (self.output_format_combo.currentText() or "dwg").lower()
         self.settings_manager.update(
             translator_name=self.translator_combo.currentText(),
             source_lang=self.source_lang_combo.currentText().strip() or "en",
@@ -506,6 +556,7 @@ class MainWindow(QWidget):
             style_font=self.style_font_combo.currentText().strip(),
             save_map=self.map_checkbox.isChecked(),
             save_txt=self.txt_checkbox.isChecked(),
+            output_format=format_choice,
         )
 
     def reset_worker(self) -> None:
@@ -529,3 +580,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+OUTPUT_FORMAT_CHOICES = ["dwg", "dxf"]

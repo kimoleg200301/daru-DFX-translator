@@ -1,14 +1,17 @@
 import argparse
 import csv
 import sys
+import tempfile
 import threading
 import time
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from itertools import cycle
 from pathlib import Path
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple
 
 import ezdxf
+from ezdxf.addons import odafc
+from ezdxf.addons.odafc import ODAFCNotInstalledError, UnknownODAFCError
 
 import apply_dxf_translation as applier
 import extract_dxf_texts as extractor
@@ -56,6 +59,50 @@ def ensure_parent(path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
 
 
+def _determine_output_format(output_format: Optional[str], output_path: Path) -> str:
+    if output_format:
+        fmt = output_format.lower()
+    else:
+        suffix = output_path.suffix.lower()
+        fmt = "dwg" if suffix == ".dwg" else "dxf"
+    if fmt not in {"dwg", "dxf"}:
+        raise RuntimeError("Поддерживаются только форматы DWG и DXF")
+    return fmt
+
+
+def _convert_with_odafc(source: Path, dest: Path, logger: Callable[[str], None], *, replace: bool = True) -> None:
+    try:
+        odafc.convert(str(source), str(dest), version="R2018", replace=replace)
+    except ODAFCNotInstalledError as exc:
+        raise RuntimeError(
+            "Не найден ODA File Converter. Установите ODAFileConverter и добавьте его в PATH."
+        ) from exc
+    except UnknownODAFCError as exc:
+        raise RuntimeError(f"Ошибка ODA File Converter: {exc}") from exc
+    except Exception as exc:  # pragma: no cover - best effort
+        raise RuntimeError(f"Не удалось конвертировать файл через ODA FC: {exc}") from exc
+    else:
+        logger(f"Конвертация выполнена: {dest}")
+
+
+def _prepare_input_file(path: Path, logger: Callable[[str], None], stack: ExitStack) -> Path:
+    ext = path.suffix.lower()
+    if ext == ".dxf":
+        return path
+    if ext == ".dwg":
+        logger("Преобразуем DWG в DXF для обработки...")
+        temp_dir = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="daru_in_")))
+        dxf_path = temp_dir / f"{path.stem}_source.dxf"
+        _convert_with_odafc(path, dxf_path, logger)
+        return dxf_path
+    raise RuntimeError("Поддерживаются только входные файлы с расширением DWG или DXF")
+
+
+def _prepare_output_destination(path: Path, fmt: str) -> Path:
+    suffix = ".dwg" if fmt == "dwg" else ".dxf"
+    return path.with_suffix(suffix)
+
+
 def write_translated_txt(path: Path, items: List[Tuple[str, int]], translations: List[str]) -> None:
     with path.open("w", encoding="utf-8") as f:
         for (text, count), translated in zip(items, translations):
@@ -94,6 +141,7 @@ def translate_dxf(
     openai_temperature: float = 0.2,
     openai_strict_mode: Optional[str] = None,
     openai_strict_value: Optional[float] = None,
+    output_format: Optional[str] = None,
     map_path: Optional[Path] = None,
     save_map: bool = True,
     extracted_txt_path: Optional[Path] = None,
@@ -104,10 +152,18 @@ def translate_dxf(
 ) -> Dict[str, Any]:
     logger = log or (lambda message: None)
 
-    logger(f"Загружаем DXF: {input_path}")
-    doc = ezdxf.readfile(str(input_path))
+    input_path = input_path.expanduser()
+    output_path = output_path.expanduser()
 
-    freq = extractor.extract_text_counts(doc)
+    final_format = _determine_output_format(output_format, output_path)
+
+    with ExitStack() as stack:
+        processing_input = _prepare_input_file(input_path, logger, stack)
+
+        logger(f"Загружаем чертёж: {processing_input}")
+        doc = ezdxf.readfile(str(processing_input))
+
+        freq = extractor.extract_text_counts(doc)
     sorted_items = extractor.sort_frequency(freq)
     english_texts = [text for text, _ in sorted_items]
     logger(f"Найдено {len(english_texts)} текстовых элементов для перевода")
@@ -171,12 +227,27 @@ def translate_dxf(
     logger("Применяем переводы к DXF")
     apply_translations(doc, pairs, style_font=style_font)
 
-    ensure_parent(output_path)
-    doc.saveas(str(output_path))
-    logger(f"DXF сохранён: {output_path}")
+    final_output_path = _prepare_output_destination(output_path, final_format)
+    ensure_parent(final_output_path)
+
+    with ExitStack() as stack2:
+        if final_format == "dwg":
+            temp_dir = Path(stack2.enter_context(tempfile.TemporaryDirectory(prefix="daru_out_")))
+            dxf_output = temp_dir / (final_output_path.stem + ".dxf")
+        else:
+            dxf_output = final_output_path if final_output_path.suffix.lower() == ".dxf" else final_output_path.with_suffix(".dxf")
+
+        doc.saveas(str(dxf_output))
+
+        if final_format == "dwg":
+            logger("Преобразуем результат в DWG...")
+            _convert_with_odafc(dxf_output, final_output_path, logger)
+            logger(f"DWG сохранён: {final_output_path}")
+        else:
+            logger(f"DXF сохранён: {final_output_path}")
 
     return {
-        "output_path": output_path,
+        "output_path": final_output_path,
         "backend": translator.backend_name(),
         "map_saved": bool(save_map and map_path),
         "extracted_txt_saved": bool(save_txt and extracted_txt_path),
@@ -195,6 +266,11 @@ def run_pipeline(args: argparse.Namespace) -> None:
     def cli_log(message: str) -> None:
         print(colorize(message, "36")) if message else None
 
+    output_format_cli = (args.output_format or "dwg").lower()
+    if output_format_cli not in {"dwg", "dxf"}:
+        raise SystemExit("Недопустимый формат вывода. Используйте dwg или dxf")
+    output_path = output_path.with_suffix(".dwg" if output_format_cli == "dwg" else ".dxf")
+
     try:
         result = translate_dxf(
             input_path=input_path,
@@ -210,6 +286,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             openai_temperature=getattr(args, "openai_temperature", 0.2),
             openai_strict_mode=getattr(args, "openai_strict_mode", None),
             openai_strict_value=getattr(args, "openai_strict_value", None),
+            output_format=output_format_cli,
             map_path=map_path,
             save_map=not args.no_map,
             extracted_txt_path=extracted_txt_path,
@@ -231,9 +308,9 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Extract, auto-translate and apply translations to DXF.")
-    parser.add_argument("input_dxf", help="Входной DXF файл")
-    parser.add_argument("output_dxf", help="Выходной DXF файл")
+    parser = argparse.ArgumentParser(description="Extract, translate and reapply text for DWG/DXF files.")
+    parser.add_argument("input_dxf", help="Входной DWG/DXF файл")
+    parser.add_argument("output_dxf", help="Выходной DWG/DXF файл")
     parser.add_argument("--map-csv", default="map_auto.csv", help="Путь для сохранения карты переводов CSV")
     parser.add_argument("--no-map", action="store_true", help="Не сохранять CSV карту переводов")
     parser.add_argument("--extracted-txt", default="extracted_texts.txt", help="TXT с исходным текстом")
@@ -266,6 +343,12 @@ def parse_args() -> argparse.Namespace:
         "--openai-strict-value",
         type=float,
         help="Значение параметра verbosity/effort (0.0-1.0)",
+    )
+    parser.add_argument(
+        "--output-format",
+        choices=["dwg", "dxf"],
+        default="dwg",
+        help="Формат итогового файла",
     )
     return parser.parse_args()
 

@@ -1,23 +1,24 @@
-# Daru DXF Translator
+# Daru DWG Translator
 
-Инструмент для автоматического извлечения текста из DXF-чертежей, перевода на выбранный язык и обратного применения перевода. Проект включает графический интерфейс на PySide6 и CLI-пайплайн, поддерживает Google/DeepL/OpenAI и может формировать вспомогательные CSV/TXT файлы для контроля качества.
+Приложение для автоматической локализации DWG/DXF-чертежей. Инструмент извлекает весь текст из исходного DWG (или DXF), переводит его выбранным движком и сохраняет результат в нужном формате (по умолчанию DWG). Доступны графический интерфейс на PySide6 и CLI-пайплайн, поддерживающие Google Translate, DeepL и OpenAI.
 
 ## Возможности
 
-- Извлечение всех текстовых сущностей из DXF и отображение частот.
-- Перевод через `google`, `deep_google`, `googletrans`, `deepl`, `chatgpt` (OpenAI) или `noop`.
-- Поддержка OpenAI GPT-5 моделей с выбором параметра `verbosity/effort` вместо температуры.
-- Сохранение карты соответствий в CSV и текстовых файлов с оригиналом/переводом.
-- Автоматическая замена текста в копии исходного чертежа.
+- Поддержка DWG и DXF: входной DWG автоматически конвертируется во временный DXF, а результат можно получить обратно в DWG или в DXF.
+- Извлечение всех текстовых сущностей и просмотр их частот.
+- Движки перевода: `google`, `deep_google`, `googletrans`, `deepl`, `chatgpt` (OpenAI) и `noop`.
+- OpenAI GPT-5 модели с управлением строгостью через `verbosity`/`effort` вместо температуры.
+- Сохранение карты соответствий в CSV и TXT-файлы с оригиналами/переводами.
 - Графический интерфейс с полосатым логом, поддержкой drag & drop и настройками API.
 
 ## Требования
 
 - Python 3.9+
-- Системные зависимости из `requirements-gui.txt`:
+- Зависимости из `requirements-gui.txt`:
   - PySide6, pyinstaller, ezdxf, deep-translator, googletrans==4.0.0-rc1, deepl, openai
+- [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter) в `PATH` — именно он обеспечивает конверсию DWG ↔ DXF через `ezdxf.addons.odafc`.
 
-Создайте виртуальное окружение и установите зависимости:
+Установка зависимостей (рекомендуется виртуальное окружение):
 
 ```bash
 python3 -m venv .venv
@@ -25,11 +26,10 @@ source .venv/bin/activate
 pip install -r requirements-gui.txt
 ```
 
-## Настройка ключей API
+## Настройка API
 
-- **OpenAI**: установите `OPENAI_API_KEY` (и при необходимости `OPENAI_BASE_URL`) через настройки GUI или переменные окружения. Клиент автоматически подхватит ключ для `chatgpt`.
-  - Для моделей семейства GPT-5 доступен выбор строгого параметра (`verbosity` или `effort`) и уровня (0–100), вместо температуры.
-- **DeepL**: задайте `DEEPL_AUTH_KEY`/`DEEPL_API_KEY` в окружении или в GUI.
+- **OpenAI**: задайте `OPENAI_API_KEY` (и при необходимости `OPENAI_BASE_URL`) в настройках GUI или через переменные окружения. Для GPT-5 доступны параметры `verbosity` или `effort` с уровнем 0–100.
+- **DeepL**: укажите `DEEPL_AUTH_KEY`/`DEEPL_API_KEY` в настройках или окружении.
 
 ## Запуск GUI
 
@@ -37,15 +37,16 @@ pip install -r requirements-gui.txt
 python3 daru_gui.py
 ```
 
-В интерфейсе выберите входной DXF, при необходимости укажите пути для выходных файлов и выберите движок перевода. В разделе «Настройки API» сохраните ключи before запуска. Лог отображает ход работы, чередуя белый/серый фон строк.
+В интерфейсе перетащите DWG/DXF, выберите формат результата (по умолчанию DWG), заполните опциональные пути для CSV/TXT и сохраните ключи API. Лог отображает ход обработки с обновлением статуса и цветовым выделением финальных сообщений.
 
 ## CLI-пайплайн
 
-Для пакетной обработки без GUI используйте `auto_translate_dxf.py`:
+Пример обработки с сохранением в DWG:
 
 ```bash
-python3 auto_translate_dxf.py INPUT.dxf OUTPUT_ru.dxf \
+python3 auto_translate_dxf.py INPUT.dwg OUTPUT_ru.dwg \
     --translator chatgpt \
+    --output-format dwg \
     --map-csv OUTPUT_map.csv \
     --extracted-txt OUTPUT_texts.txt \
     --translated-txt OUTPUT_texts_ru.txt \
@@ -53,28 +54,30 @@ python3 auto_translate_dxf.py INPUT.dxf OUTPUT_ru.dxf \
     --openai-strict-value 0.6
 ```
 
-- Используйте `--translator` для выбора движка.
-- Опции `--no-map` и `--skip-txt` отменяют сохранение CSV/TXT.
-- Для GPT-5 моделей используйте `--openai-strict-mode` (`verbosity`/`effort`) и `--openai-strict-value` (0.0–1.0) для контроля строгости.
-- Для OpenAI/DeepL ключи должны быть заданы, как описано выше.
+Полезные флаги:
+
+- `--translator` — выбор движка перевода.
+- `--output-format` — целевой формат (`dwg` по умолчанию, можно указать `dxf`).
+- `--no-map`, `--skip-txt` — отключают генерацию CSV и TXT.
+- `--openai-strict-mode` / `--openai-strict-value` — контроль strictness для GPT-5.
 
 ## Сборка standalone
 
-PyInstaller-спека уже настроена. После установки зависимостей выполните:
+PyInstaller-спека уже настроена. Перед сборкой убедитесь, что ODA File Converter доступен в `PATH`, затем выполните:
 
 ```bash
 pyinstaller daru_gui.spec
 ```
 
-Готовый артефакт появится в директории `dist/`.
+Собранные артефакты появятся в папке `dist/`.
 
 ## Полезные файлы
 
-- `auto_translation.py` — ядро движков перевода и нормализация текста.
+- `auto_translation.py` — ядро движков перевода и нормализации текста.
+- `auto_translate_dxf.py` — пайплайн DWG/DXF → перевод → DWG/DXF.
 - `apply_dxf_translation.py` — применение перевода к DXF.
-- `extract_dxf_texts.py` — извлечение и сортировка текста.
-- `build_translations.py` — билд-скрипт для пакетной обработки.
+- `extract_dxf_texts.py` — извлечение и сортировка текстов.
 
 ## Обратная связь
 
-В логах CLI/GUI приводятся расшифровки ошибок. При проблемах с API убедитесь, что ключи заданы и сеть доступна.
+CLI и GUI выводят подробные сообщения об ошибках. При сбоях убедитесь, что ключи API заданы, ODA File Converter установлен и путь к нему доступен.
