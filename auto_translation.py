@@ -470,12 +470,15 @@ class TranslationEngine:
         if not candidate_indices:
             return results
 
+        reasoning_note = self._openai_reasoning_note(model)
         system_content = (
             "You are a professional technical translator. Translate the provided values from "
             f"{self.source_lang or 'auto-detected'} to {self.target_lang}. Preserve numbers, "
             "placeholders like '__DXF_DIM__', and DXF control sequences such as '\n'. Respond "
             "with strict JSON: {\"translations\": [{\"id\": \"<id>\", \"text\": \"<translated>\"}, ...]}"
         )
+        if reasoning_note:
+            system_content = f"{system_content} {reasoning_note}"
 
         for chunk in chunked(candidate_indices, batch_size):
             payload = [
@@ -565,9 +568,36 @@ class TranslationEngine:
     def _openai_generation_kwargs(self, model: Optional[str]) -> Dict[str, Any]:
         model_key = (model or "").lower()
         if model_key in OPENAI_REASONING_MODELS:
-            param = self.openai_strict_mode if self.openai_strict_mode in {"verbosity", "effort"} else "verbosity"
-            return {param: self.openai_strict_value}
+            return {}
         return {"temperature": self.openai_temperature}
+
+    def _openai_reasoning_note(self, model: Optional[str]) -> str:
+        model_key = (model or "").lower()
+        if model_key not in OPENAI_REASONING_MODELS:
+            return ""
+        param = self.openai_strict_mode if self.openai_strict_mode in {"verbosity", "effort"} else "verbosity"
+        level = self._strict_descriptor()
+        if param == "effort":
+            mapping = {
+                "low": "Keep reasoning effort minimal to prioritise speed over exhaustive detail.",
+                "medium": "Balance reasoning effort to maintain accuracy without unnecessary verbosity.",
+                "high": "Apply high reasoning effort to maximise translation accuracy and nuance.",
+            }
+            return mapping.get(level, "")
+        mapping = {
+            "low": "Keep the response concise while still delivering an accurate translation.",
+            "medium": "Provide a balanced level of detail to ensure clarity and accuracy.",
+            "high": "Provide exhaustive detail to ensure every nuance of the translation is captured.",
+        }
+        return mapping.get(level, "")
+
+    def _strict_descriptor(self) -> str:
+        value = self.openai_strict_value
+        if value <= 0.34:
+            return "low"
+        if value <= 0.67:
+            return "medium"
+        return "high"
 
     def _google_free_translate_batch(self, texts: Sequence[str]) -> List[str]:  # pragma: no cover - network
         import json as _json
