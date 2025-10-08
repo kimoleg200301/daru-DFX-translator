@@ -87,6 +87,8 @@ OPENAI_BASE_URL_CHOICES = [
     "https://api.perplexity.ai",
 ]
 
+OUTPUT_FORMAT_CHOICES = ["dwg", "dxf"]
+
 
 def populate_combo(combo: QComboBox, options: Iterable[str], current: str = "", allow_empty: bool = False) -> None:
     combo.blockSignals(True)
@@ -580,4 +582,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-OUTPUT_FORMAT_CHOICES = ["dwg", "dxf"]
