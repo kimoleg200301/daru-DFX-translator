@@ -6,6 +6,7 @@
 
 - Извлечение всех текстовых сущностей из DXF и отображение частот.
 - Перевод через `google`, `deep_google`, `googletrans`, `deepl`, `chatgpt` (OpenAI) или `noop`.
+- Поддержка OpenAI GPT-5 моделей с выбором параметра `verbosity/effort` вместо температуры.
 - Сохранение карты соответствий в CSV и текстовых файлов с оригиналом/переводом.
 - Автоматическая замена текста в копии исходного чертежа.
 - Графический интерфейс с полосатым логом, поддержкой drag & drop и настройками API.
@@ -27,6 +28,7 @@ pip install -r requirements-gui.txt
 ## Настройка ключей API
 
 - **OpenAI**: установите `OPENAI_API_KEY` (и при необходимости `OPENAI_BASE_URL`) через настройки GUI или переменные окружения. Клиент автоматически подхватит ключ для `chatgpt`.
+  - Для моделей семейства GPT-5 доступен выбор строгого параметра (`verbosity` или `effort`) и уровня (0–100), вместо температуры.
 - **DeepL**: задайте `DEEPL_AUTH_KEY`/`DEEPL_API_KEY` в окружении или в GUI.
 
 ## Запуск GUI
@@ -46,11 +48,14 @@ python3 auto_translate_dxf.py INPUT.dxf OUTPUT_ru.dxf \
     --translator chatgpt \
     --map-csv OUTPUT_map.csv \
     --extracted-txt OUTPUT_texts.txt \
-    --translated-txt OUTPUT_texts_ru.txt
+    --translated-txt OUTPUT_texts_ru.txt \
+    --openai-strict-mode verbosity \
+    --openai-strict-value 0.6
 ```
 
 - Используйте `--translator` для выбора движка.
 - Опции `--no-map` и `--skip-txt` отменяют сохранение CSV/TXT.
+- Для GPT-5 моделей используйте `--openai-strict-mode` (`verbosity`/`effort`) и `--openai-strict-value` (0.0–1.0) для контроля строгости.
 - Для OpenAI/DeepL ключи должны быть заданы, как описано выше.
 
 ## Сборка standalone

@@ -2,9 +2,17 @@ import json
 import os
 import re
 from itertools import zip_longest
-from typing import Callable, Iterable, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 DIM_PLACEHOLDER = "__DXF_DIM__"
+
+OPENAI_REASONING_MODELS = {
+    "gpt-5-chat-latest",
+    "gpt-5-mini",
+    "gpt-5-codex",
+    "gpt-5-pro",
+    "gpt-5",
+}
 
 
 def chunked(seq: Sequence[str], size: int) -> Iterable[Sequence[str]]:
@@ -50,6 +58,8 @@ class TranslationEngine:
         openai_model: Optional[str] = None,
         openai_base_url: Optional[str] = None,
         openai_temperature: float = 0.2,
+        openai_strict_mode: Optional[str] = None,
+        openai_strict_value: Optional[float] = None,
     ):
         self.provider = (provider or "google").lower()
         self.source_lang = source_lang or "auto"
@@ -59,6 +69,19 @@ class TranslationEngine:
         self.openai_model = openai_model or os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
         self.openai_base_url = openai_base_url or os.environ.get("OPENAI_BASE_URL")
         self.openai_temperature = openai_temperature
+        mode_candidate = (openai_strict_mode or os.environ.get("OPENAI_STRICT_MODE", "")).strip().lower()
+        self.openai_strict_mode = mode_candidate if mode_candidate in {"verbosity", "effort"} else "verbosity"
+        value_candidate = openai_strict_value
+        if value_candidate is None:
+            env_value = os.environ.get("OPENAI_STRICT_VALUE")
+            if env_value is not None:
+                try:
+                    value_candidate = float(env_value)
+                except ValueError:
+                    value_candidate = None
+        if value_candidate is None:
+            value_candidate = 0.5
+        self.openai_strict_value = max(0.0, min(1.0, value_candidate))
         self._translator = None
         self._backend = None
         self._translate_batch = None
@@ -476,19 +499,18 @@ class TranslationEngine:
                         {"role": "user", "content": single_payload},
                     ]
                     try:
+                        base_kwargs: Dict[str, Any] = {
+                            "model": model,
+                            "messages": single_messages,
+                        }
+                        base_kwargs.update(self._openai_generation_kwargs(model))
                         if chat_completion_create:
-                            completion_kwargs = {
-                                "model": model,
-                                "temperature": self.openai_temperature,
-                                "messages": single_messages,
-                                "response_format": {"type": "json_object"},
-                            }
-                            completion = chat_completion_create(**completion_kwargs)  # type: ignore[misc]
+                            modern_kwargs = dict(base_kwargs)
+                            modern_kwargs["response_format"] = {"type": "json_object"}
+                            completion = chat_completion_create(**modern_kwargs)  # type: ignore[misc]
                         elif module is not None:
                             completion = module.ChatCompletion.create(  # type: ignore[attr-defined]
-                                model=model,
-                                temperature=self.openai_temperature,
-                                messages=single_messages,
+                                **base_kwargs
                             )
                         else:  # pragma: no cover - defensive
                             raise RuntimeError("OpenAI legacy интерфейс недоступен")
@@ -514,11 +536,14 @@ class TranslationEngine:
                 continue
 
             try:
+                modern_kwargs: Dict[str, Any] = {
+                    "model": model,
+                    "messages": messages_payload,
+                    "response_format": {"type": "json_object"},
+                }
+                modern_kwargs.update(self._openai_generation_kwargs(model))
                 completion = client.chat.completions.create(  # type: ignore[attr-defined]
-                    model=model,
-                    temperature=self.openai_temperature,
-                    response_format={"type": "json_object"},
-                    messages=messages_payload,
+                    **modern_kwargs
                 )
             except Exception as exc:  # pragma: no cover - network
                 raise RuntimeError(f"ChatGPT translation failed: {exc}") from exc
@@ -536,6 +561,13 @@ class TranslationEngine:
                 results[idx] = translated if translated else texts[idx]
 
         return results
+
+    def _openai_generation_kwargs(self, model: Optional[str]) -> Dict[str, Any]:
+        model_key = (model or "").lower()
+        if model_key in OPENAI_REASONING_MODELS:
+            param = self.openai_strict_mode if self.openai_strict_mode in {"verbosity", "effort"} else "verbosity"
+            return {param: self.openai_strict_value}
+        return {"temperature": self.openai_temperature}
 
     def _google_free_translate_batch(self, texts: Sequence[str]) -> List[str]:  # pragma: no cover - network
         import json as _json
@@ -584,6 +616,8 @@ def auto_translate(
     openai_model: Optional[str] = None,
     openai_base_url: Optional[str] = None,
     openai_temperature: float = 0.2,
+    openai_strict_mode: Optional[str] = None,
+    openai_strict_value: Optional[float] = None,
 ) -> List[str]:
     engine = TranslationEngine(
         provider=provider,
@@ -594,5 +628,7 @@ def auto_translate(
         openai_model=openai_model,
         openai_base_url=openai_base_url,
         openai_temperature=openai_temperature,
+        openai_strict_mode=openai_strict_mode,
+        openai_strict_value=openai_strict_value,
     )
     return engine.translate_many(texts)

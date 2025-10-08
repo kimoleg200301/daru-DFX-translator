@@ -60,12 +60,25 @@ STYLE_FONT_CHOICES = [
 ]
 
 OPENAI_MODEL_CHOICES = [
+    "gpt-5-chat-latest",
+    "gpt-5-mini",
+    "gpt-5-codex",
+    "gpt-5-pro",
+    "gpt-5",
     "gpt-4o-mini",
     "gpt-4o",
     "gpt-4.1-mini",
     "gpt-4.1",
     "gpt-3.5-turbo",
 ]
+
+OPENAI_REASONING_MODELS = {
+    "gpt-5-chat-latest",
+    "gpt-5-mini",
+    "gpt-5-codex",
+    "gpt-5-pro",
+    "gpt-5",
+}
 
 OPENAI_BASE_URL_CHOICES = [
     "https://api.openai.com/v1",
@@ -107,6 +120,8 @@ class AppSettings:
     openai_model: str = "gpt-4o-mini"
     openai_base_url: str = ""
     openai_temperature: float = 0.2
+    openai_strict_mode: str = "verbosity"
+    openai_strict_value: float = 0.5
     save_map: bool = True
     save_txt: bool = True
     last_directory: str = str(Path.home())
@@ -172,6 +187,15 @@ class SettingsDialog(QDialog):
         self.openai_temp_spin = QSpinBox()
         self.openai_temp_spin.setRange(0, 100)
         self.openai_temp_spin.setValue(int(settings.openai_temperature * 100))
+        self.openai_strict_mode_combo = QComboBox()
+        self.openai_strict_mode_combo.addItems(["verbosity", "effort"])
+        current_mode = settings.openai_strict_mode or "verbosity"
+        if current_mode not in {"verbosity", "effort"}:
+            current_mode = "verbosity"
+        self.openai_strict_mode_combo.setCurrentText(current_mode)
+        self.openai_strict_value_spin = QSpinBox()
+        self.openai_strict_value_spin.setRange(0, 100)
+        self.openai_strict_value_spin.setValue(int(settings.openai_strict_value * 100))
 
         self.openai_key_edit.setEchoMode(QLineEdit.Password)
         self.deepl_edit.setEchoMode(QLineEdit.Password)
@@ -181,7 +205,12 @@ class SettingsDialog(QDialog):
         form.addRow("OpenAI Model", self.openai_model_combo)
         form.addRow("OpenAI Base URL", self.openai_url_combo)
         form.addRow("OpenAI Temperature (x100)", self.openai_temp_spin)
+        form.addRow("OpenAI Strict Parameter", self.openai_strict_mode_combo)
+        form.addRow("OpenAI Strict Value (x100)", self.openai_strict_value_spin)
         layout.addLayout(form)
+
+        self.openai_model_combo.currentTextChanged.connect(self._update_openai_param_visibility)
+        self._update_openai_param_visibility(self.openai_model_combo.currentText())
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -195,7 +224,15 @@ class SettingsDialog(QDialog):
             "openai_model": self.openai_model_combo.currentText().strip() or "gpt-4o-mini",
             "openai_base_url": self.openai_url_combo.currentText().strip(),
             "openai_temperature": self.openai_temp_spin.value() / 100.0,
+            "openai_strict_mode": self.openai_strict_mode_combo.currentText().strip() or "verbosity",
+            "openai_strict_value": self.openai_strict_value_spin.value() / 100.0,
         }
+
+    def _update_openai_param_visibility(self, model: str) -> None:
+        is_reasoning = (model or "").lower() in OPENAI_REASONING_MODELS
+        self.openai_temp_spin.setEnabled(not is_reasoning)
+        self.openai_strict_mode_combo.setEnabled(is_reasoning)
+        self.openai_strict_value_spin.setEnabled(is_reasoning)
 
 
 class TranslateWorker(QThread):
@@ -432,6 +469,8 @@ class MainWindow(QWidget):
             "openai_model": self.settings_manager.data.openai_model or None,
             "openai_base_url": self.settings_manager.data.openai_base_url or None,
             "openai_temperature": self.settings_manager.data.openai_temperature,
+            "openai_strict_mode": self.settings_manager.data.openai_strict_mode or None,
+            "openai_strict_value": self.settings_manager.data.openai_strict_value,
             "map_path": Path(self.map_path_edit.text()) if self.map_checkbox.isChecked() and self.map_path_edit.text() else None,
             "save_map": self.map_checkbox.isChecked(),
             "extracted_txt_path": Path(self.extracted_path_edit.text()) if self.txt_checkbox.isChecked() and self.extracted_path_edit.text() else None,

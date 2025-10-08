@@ -92,6 +92,8 @@ def translate_dxf(
     openai_model: Optional[str] = None,
     openai_base_url: Optional[str] = None,
     openai_temperature: float = 0.2,
+    openai_strict_mode: Optional[str] = None,
+    openai_strict_value: Optional[float] = None,
     map_path: Optional[Path] = None,
     save_map: bool = True,
     extracted_txt_path: Optional[Path] = None,
@@ -119,6 +121,8 @@ def translate_dxf(
         openai_model=openai_model,
         openai_base_url=openai_base_url,
         openai_temperature=openai_temperature,
+        openai_strict_mode=openai_strict_mode,
+        openai_strict_value=openai_strict_value,
     )
     logger(f"Инициализирован движок перевода: {translator.backend_name()}")
 
@@ -142,6 +146,10 @@ def translate_dxf(
         if processed < total_items:
             # На случай, если последний перевод не дожал до 100%
             logger("Начинаем перевод... [100%]")
+        if len(russian_texts) < total_items:
+            russian_texts.extend(english_texts[len(russian_texts) :])
+        elif len(russian_texts) > total_items:
+            del russian_texts[total_items:]
     logger("Перевод завершён")
 
     if save_txt and extracted_txt_path:
@@ -200,6 +208,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
             openai_model=getattr(args, "openai_model", None),
             openai_base_url=getattr(args, "openai_base_url", None),
             openai_temperature=getattr(args, "openai_temperature", 0.2),
+            openai_strict_mode=getattr(args, "openai_strict_mode", None),
+            openai_strict_value=getattr(args, "openai_strict_value", None),
             map_path=map_path,
             save_map=not args.no_map,
             extracted_txt_path=extracted_txt_path,
@@ -246,6 +256,16 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.2,
         help="Температура генерации ChatGPT (default: 0.2)",
+    )
+    parser.add_argument(
+        "--openai-strict-mode",
+        choices=["verbosity", "effort"],
+        help="Параметр строгого режима для GPT-5 моделей (verbosity/effort)",
+    )
+    parser.add_argument(
+        "--openai-strict-value",
+        type=float,
+        help="Значение параметра verbosity/effort (0.0-1.0)",
     )
     return parser.parse_args()
 
