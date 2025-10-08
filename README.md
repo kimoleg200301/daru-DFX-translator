@@ -16,7 +16,7 @@
 - Python 3.9+
 - Зависимости из `requirements-gui.txt`:
   - PySide6, pyinstaller, ezdxf, deep-translator, googletrans==4.0.0-rc1, deepl, openai
-- [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter) в `PATH` — именно он обеспечивает конверсию DWG ↔ DXF через `ezdxf.addons.odafc`.
+- [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter) в `PATH` — именно он обеспечивает конверсию DWG ↔ DXF через `ezdxf.addons.odafc`. Можно также задать переменные среды `ODA_FILE_CONVERTER` или `ODAFC_PATH`, указывающие на `ODAFileConverter.exe`.
 
 Установка зависимостей (рекомендуется виртуальное окружение):
 

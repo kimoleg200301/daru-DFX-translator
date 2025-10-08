@@ -1,5 +1,6 @@
 import argparse
 import csv
+import os
 import sys
 import tempfile
 import threading
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple
 
 import ezdxf
+from ezdxf import options as ezdxf_options
 from ezdxf.addons import odafc
 from ezdxf.addons.odafc import ODAFCNotInstalledError, UnknownODAFCError
 
@@ -71,6 +73,7 @@ def _determine_output_format(output_format: Optional[str], output_path: Path) ->
 
 
 def _convert_with_odafc(source: Path, dest: Path, logger: Callable[[str], None], *, replace: bool = True) -> None:
+    _ensure_odafc_config()
     try:
         odafc.convert(str(source), str(dest), version="R2018", replace=replace)
     except ODAFCNotInstalledError as exc:
@@ -101,6 +104,37 @@ def _prepare_input_file(path: Path, logger: Callable[[str], None], stack: ExitSt
 def _prepare_output_destination(path: Path, fmt: str) -> Path:
     suffix = ".dwg" if fmt == "dwg" else ".dxf"
     return path.with_suffix(suffix)
+
+
+def _ensure_odafc_config() -> None:
+    if odafc.is_installed():
+        return
+
+    candidates = []
+    env_exec = os.environ.get("ODA_FILE_CONVERTER")
+    if env_exec:
+        candidates.append(Path(env_exec))
+    env_path = os.environ.get("ODAFC_PATH") or os.environ.get("ODAFC_HOME")
+    if env_path:
+        candidates.append(Path(env_path) / "ODAFileConverter.exe")
+
+    if os.name == "nt":
+        program_files = [os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")]
+        for base in program_files:
+            if not base:
+                continue
+            oda_dir = Path(base) / "ODA"
+            if oda_dir.exists():
+                for sub in sorted(oda_dir.glob("ODAFileConverter*"), reverse=True):
+                    candidates.append(sub / "ODAFileConverter.exe")
+
+    for candidate in candidates:
+        if candidate and candidate.exists():
+            ezdxf_options.set("odafc-addon", "win_exec_path", str(candidate))
+            if odafc.is_installed():
+                return
+
+    # if still not installed, odafc.convert will raise the detailed error
 
 
 def write_translated_txt(path: Path, items: List[Tuple[str, int]], translations: List[str]) -> None:
